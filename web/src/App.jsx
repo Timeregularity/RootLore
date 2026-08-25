@@ -1,32 +1,174 @@
 import { useMemo, useState } from "react";
-import { ArrowRight, Check, ExternalLink, FileCheck2, GitMerge, Link2, Menu, Search, ShieldCheck, Sparkles, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import {
+  ArrowRight, Check, ExternalLink, FileCheck2, GitMerge, Link2, Menu,
+  Search, ShieldCheck, Sparkles, ThumbsDown, ThumbsUp, X,
+} from "lucide-react";
+import { analyzeQuality } from "./quality.js";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
-// Quality signals currently displayed for the submitted issue report.
-const checks = [["Problem description",true],["Actual behaviour",true],["Operating system",false],["Steps to reproduce",false],["Application version",false],["Relevant logs",false]];
-// Convert a normal GitHub URL into the owner and repository required by the API.
-function parseRepo(value){try{const url=new URL(value);if(!["github.com","www.github.com"].includes(url.hostname))return null;const [owner,name]=url.pathname.split("/").filter(Boolean);return owner&&name?{owner,name:name.replace(/\.git$/,"")}:null}catch{return null}}
-// Tokenize report text and rank repository issues by shared meaningful words.
-function words(value){return new Set(value.toLowerCase().match(/[a-z0-9]{3,}/g)||[])}
-function rank(issues,query){const terms=words(query);return issues.map(issue=>{const text=words(`${issue.title} ${issue.body||""} ${issue.labels.join(" ")}`);return {...issue,score:terms.size?Math.round([...terms].filter(term=>text.has(term)).length/terms.size*100):0}}).filter(issue=>issue.score).sort((a,b)=>b.score-a.score||b.comments-a.comments).slice(0,5)}
-// CSS-driven product mark used in the navigation bar.
-function Logo(){return <div className="logo-shape"><span/><span/></div>}
 
-export default function App(){
- // Form, navigation, request, results, and feedback state for the workspace.
- const [menu,setMenu]=useState(false),[repositoryUrl,setRepositoryUrl]=useState("https://github.com/facebook/react"),[title,setTitle]=useState("Application fails after an update"),[description,setDescription]=useState("The application stops working after updating. I expected it to continue running normally."),[loading,setLoading]=useState(false),[results,setResults]=useState(null),[feedback,setFeedback]=useState(""),[error,setError]=useState("");
- const repo=useMemo(()=>parseRepo(repositoryUrl),[repositoryUrl]);
- // Fetch live issues, rank them against the report, and expose failures to the UI.
- async function analyze(){if(!repo||!title.trim()||!description.trim())return;setLoading(true);setResults(null);setError("");setFeedback("");const started=performance.now();try{const response=await fetch(`${API_URL}/api/repositories/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/issues`);const data=await response.json();if(!response.ok)throw new Error(data.error||"Could not read this repository");setResults({issues:data.issues,related:rank(data.issues,`${title} ${description}`),elapsed:((performance.now()-started)/1000).toFixed(1)})}catch(reason){setError(reason.message||"Analysis failed. Please try again.")}finally{setLoading(false)}}
- // Main page shell: navigation, report form, and conditional analysis results.
- return <div className="site-shell"><div className="ambient one"/><div className="ambient two"/><header className="navbar"><a className="brand" href="#top"><Logo/><span>RootLore</span></a><nav className={menu?"nav-links open":"nav-links"}><a className="active" href="#workspace">Workspace</a><a href="#history">History</a><a href="#knowledge">Knowledge</a><button className="nav-close" onClick={()=>setMenu(false)}><X size={18}/></button></nav><div className="nav-actions"><button className="repository-pill"><span className="repo-orb">{repo?.owner?.[0]?.toUpperCase()||"R"}</span>{repo?`${repo.owner}/${repo.name}`:"Choose repository"}</button><div className="user-avatar">AK</div><button className="menu-button" onClick={()=>setMenu(true)}><Menu size={20}/></button></div></header>
- <main id="top"><section className="hero" id="workspace"><div className="hero-copy"><div className="kicker"><Sparkles size={14}/>Repository intelligence</div><h1>Turn issue history into <em>clear answers.</em></h1><p>Improve incomplete reports and uncover related issues backed by real project evidence.</p></div><div className="sync-card"><span className="sync-icon"><Check size={16}/></span><div><strong>Live GitHub analysis</strong><small>Public repository data · fetched on demand</small></div><ArrowRight size={16}/></div></section>
- <section className="analysis-panel"><div className="panel-topline"><div><span className="step-label">01 · NEW ANALYSIS</span><h2>What happened?</h2></div><span className="privacy-note"><ShieldCheck size={14}/>Strict evidence mode</span></div><label className="repository-field"><span>GitHub repository URL</span><div className="url-input"><GitMerge size={18}/><input type="url" value={repositoryUrl} onChange={e=>setRepositoryUrl(e.target.value)} placeholder="https://github.com/owner/repository"/></div><small>We search the latest public issues from this repository.</small></label><div className="form-grid"><label><span>Issue title</span><input value={title} onChange={e=>setTitle(e.target.value)}/></label><label className="description-field"><span>Description</span><textarea rows="4" value={description} onChange={e=>setDescription(e.target.value)}/><small>{description.length} characters</small></label></div>{!repo&&repositoryUrl&&<p className="form-error">Enter a valid github.com/owner/repository URL.</p>}{error&&<p className="form-error">{error}</p>}<div className="form-footer"><p>Run a private preview before posting anything.</p><button className="analyze-button" onClick={analyze} disabled={loading||!repo||!title.trim()||!description.trim()}>{loading?<><span className="spinner"/>Reading project history</>:<><Search size={17}/>Analyze issue<ArrowRight size={16}/></>}</button></div></section>
- {results&&<Results data={results} feedback={feedback} setFeedback={setFeedback}/>}</main></div>
+// Convert a normal GitHub URL into values accepted by the backend route.
+function parseRepository(value) {
+  try {
+    const url = new URL(value);
+    if (!["github.com", "www.github.com"].includes(url.hostname)) return null;
+    const [owner, name] = url.pathname.split("/").filter(Boolean);
+    return owner && name ? { owner, name: name.replace(/\.git$/, "") } : null;
+  } catch {
+    return null;
+  }
 }
 
-// Present issue quality, strongest evidence, related history, and coverage totals.
+function Logo() {
+  return <div className="logo-shape"><span/><span/></div>;
+}
 
-function Results({data,feedback,setFeedback}){const found=checks.filter(([,ok])=>ok).length;return <section className="results-section"><div className="section-heading"><div><span className="step-label">02 · RESULTS</span><h2>An evidence-backed answer</h2></div><span className="analysis-time">Analyzed {data.issues.length} recent issues in {data.elapsed} seconds</span></div><div className="results-layout"><article className="quality-card surface-card"><div className="card-heading"><div className="soft-icon blush"><FileCheck2 size={19}/></div><div><h3>Issue quality</h3><p>{checks.length-found} details need attention</p></div><div className="quality-score"><strong>{Math.round(found/checks.length*100)}</strong><span>/100</span></div></div><div className="check-grid">{checks.map(([label,ok])=><div className={ok?"check-row found":"check-row missing"} key={label}><span>{ok?<Check size={13}/>:"·"}</span><p>{label}</p><small>{ok?"Found":"Missing"}</small></div>)}</div><div className="follow-up"><span>Improve the report</span><p>Add exact reproduction steps and the affected version.</p><p>Include logs and environment details when available.</p></div></article><article className="solution-card surface-card"><div className="solution-glow"/><div className="card-heading"><div className="soft-icon navy"><ShieldCheck size={19}/></div><div><h3>Evidence summary</h3><p>Based only on live repository results</p></div><span className="confidence"><i/>{data.related.length?`${data.related.length} matches`:"No match"}</span></div><div className="solution-summary"><span><Link2 size={20}/></span><div><small>REPOSITORY SIGNAL</small><h3>{data.related[0]?.title||"No related issue found"}</h3><p>{data.related[0]?`Issue #${data.related[0].number} has the strongest keyword overlap (${data.related[0].score}%). Review it before acting.`:"Try adding specific error messages, platform details, or version numbers."}</p></div></div></article></div>
- <article className="related-card surface-card" id="history"><div className="card-heading related-heading"><div className="soft-icon lilac"><Link2 size={19}/></div><div><h3>Related project history</h3><p>Ranked by overlap with the report</p></div></div><div className="match-list">{data.related.length?data.related.map(item=><a className="match-row" href={item.url} target="_blank" rel="noreferrer" key={item.number}><span className="match-number">#{item.number}</span><div><h4>{item.title}</h4><p>{item.state} · {item.comments} comments · {item.labels.slice(0,3).join(", ")||"no labels"}</p></div><span className={item.score>=60?"match-tag duplicate":"match-tag"}>{item.score>=60?"Strong match":"Related"}</span><strong>{item.score}%</strong><ExternalLink size={15}/></a>):<p className="empty-state">No related issues were found in the latest repository history.</p>}</div></article>
- <div className="bottom-row" id="knowledge"><article className="coverage-card surface-card"><div><span className="step-label">KNOWLEDGE COVERAGE</span><h3>Live repository context.</h3><p>This preview searches the latest issues returned by GitHub.</p></div><div className="coverage-stats"><span><strong>{data.issues.length}</strong><small>Issues read</small></span><span><strong>{data.issues.filter(i=>i.state==="open").length}</strong><small>Open</small></span><span><strong>{data.issues.filter(i=>i.state==="closed").length}</strong><small>Closed</small></span><span><strong>{data.related.length}</strong><small>Matches</small></span></div></article><article className="feedback-card surface-card"><div className="soft-icon blush"><Sparkles size={19}/></div><div><h3>Was this useful?</h3><p>Your feedback improves future results.</p></div><div className="feedback-actions"><button className={feedback==="yes"?"selected":""} onClick={()=>setFeedback("yes")}><ThumbsUp size={15}/>Yes</button><button className={feedback==="no"?"selected no":""} onClick={()=>setFeedback("no")}><ThumbsDown size={15}/>Not quite</button></div></article></div></section>}
+function loadHistory() {
+  try {
+    return JSON.parse(localStorage.getItem("rootlore-history")) || [];
+  } catch {
+    return [];
+  }
+}
+
+export default function App() {
+  const [menu, setMenu] = useState(false);
+  const [repositoryUrl, setRepositoryUrl] = useState("https://github.com/facebook/react");
+  const [title, setTitle] = useState("Application crashes on Windows");
+  const [description, setDescription] = useState(
+    "Version 19.0 crashes on Windows when I open developer tools. The console shows an error.",
+  );
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState(null);
+  const [feedback, setFeedback] = useState("");
+  const [error, setError] = useState("");
+  const [history, setHistory] = useState(loadHistory);
+  const repository = useMemo(() => parseRepository(repositoryUrl), [repositoryUrl]);
+
+  // Send the report to the backend RAG endpoint and store its GenAI response.
+  async function analyze() {
+    if (!repository || !title.trim() || !description.trim()) return;
+    setLoading(true);
+    setResults(null);
+    setFeedback("");
+    setError("");
+    const started = performance.now();
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/repositories/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/analyze`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, description }),
+        },
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Analysis failed");
+
+      const completedAnalysis = {
+        ...data,
+        quality: analyzeQuality(title, description),
+        elapsed: ((performance.now() - started) / 1000).toFixed(1),
+      };
+      setResults(completedAnalysis);
+
+      const historyEntry = {
+        id: Date.now(),
+        repository: data.repository,
+        title,
+        summary: data.analysis.summary,
+        confidence: data.analysis.confidence,
+        createdAt: new Date().toISOString(),
+      };
+      const updatedHistory = [historyEntry, ...history].slice(0, 10);
+      setHistory(updatedHistory);
+      localStorage.setItem("rootlore-history", JSON.stringify(updatedHistory));
+    } catch (reason) {
+      setError(reason.message || "Analysis failed. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return <div className="site-shell">
+    <div className="ambient one"/><div className="ambient two"/>
+    <header className="navbar">
+      <a className="brand" href="#top"><Logo/><span>RootLore</span></a>
+      <nav className={menu ? "nav-links open" : "nav-links"}>
+        <a className="active" href="#workspace">Workspace</a>
+        <a href="#analysis-history">History</a><a href="#knowledge">Knowledge</a>
+        <button className="nav-close" onClick={() => setMenu(false)}><X size={18}/></button>
+      </nav>
+      <div className="nav-actions">
+        <button className="repository-pill"><span className="repo-orb">{repository?.owner?.[0]?.toUpperCase() || "R"}</span>{repository ? `${repository.owner}/${repository.name}` : "Choose repository"}</button>
+        <div className="user-avatar">AK</div>
+        <button className="menu-button" onClick={() => setMenu(true)}><Menu size={20}/></button>
+      </div>
+    </header>
+
+    <main id="top">
+      <section className="hero" id="workspace">
+        <div className="hero-copy"><div className="kicker"><Sparkles size={14}/>GenAI repository intelligence</div><h1>Turn issue history into <em>clear answers.</em></h1><p>Retrieve real project evidence and use GenAI to improve reports, identify duplicates, and suggest grounded solutions.</p></div>
+        <div className="sync-card"><span className="sync-icon"><Check size={16}/></span><div><strong>RAG analysis ready</strong><small>GitHub evidence · Groq generation</small></div><ArrowRight size={16}/></div>
+      </section>
+
+      <section className="analysis-panel">
+        <div className="panel-topline"><div><span className="step-label">01 · NEW ANALYSIS</span><h2>What happened?</h2></div><span className="privacy-note"><ShieldCheck size={14}/>Evidence-only AI</span></div>
+        <label className="repository-field"><span>GitHub repository URL</span><div className="url-input"><GitMerge size={18}/><input type="url" value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} placeholder="https://github.com/owner/repository"/></div><small>RootLore retrieves recent issues and gives only relevant evidence to the model.</small></label>
+        <div className="form-grid">
+          <label><span>Issue title</span><input value={title} onChange={(event) => setTitle(event.target.value)}/></label>
+          <label className="description-field"><span>Description</span><textarea rows="4" value={description} onChange={(event) => setDescription(event.target.value)}/><small>{description.length} characters</small></label>
+        </div>
+        {!repository && repositoryUrl && <p className="form-error">Enter a valid github.com/owner/repository URL.</p>}
+        {error && <p className="form-error">{error}</p>}
+        <div className="form-footer"><p>The model must cite supplied GitHub evidence.</p><button className="analyze-button" onClick={analyze} disabled={loading || !repository || !title.trim() || !description.trim()}>{loading ? <><span className="spinner"/>Generating analysis</> : <><Search size={17}/>Analyze with GenAI<ArrowRight size={16}/></>}</button></div>
+      </section>
+
+      {results && <Results data={results} feedback={feedback} setFeedback={setFeedback}/>} 
+      <History entries={history}/>
+    </main>
+  </div>;
+}
+
+function Results({ data, feedback, setFeedback }) {
+  const ai = data.analysis;
+  const missing = data.quality.checks.filter(([, present]) => !present).length;
+  const improvedQuality = analyzeQuality(ai.improvedTitle, ai.improvedDescription);
+
+  return <section className="results-section">
+    <div className="section-heading"><div><span className="step-label">02 · GENAI RESULTS</span><h2>An evidence-backed answer</h2></div><span className="analysis-time">Model: {data.model} · {data.elapsed} seconds</span></div>
+    <div className="results-layout">
+      <article className="quality-card surface-card">
+        <div className="card-heading"><div className="soft-icon blush"><FileCheck2 size={19}/></div><div><h3>Issue quality</h3><p>{missing} details need attention</p></div><div className="quality-score"><strong>{data.quality.score}</strong><span>/100</span></div></div>
+        <div className="check-grid">{data.quality.checks.map(([label, present]) => <div className={present ? "check-row found" : "check-row missing"} key={label}><span>{present ? <Check size={13}/> : "·"}</span><p>{label}</p><small>{present ? "Found" : "Missing"}</small></div>)}</div>
+        <div className="follow-up"><span>AI follow-up questions</span>{ai.followUpQuestions.length ? ai.followUpQuestions.slice(0, 3).map((question) => <p key={question}>{question}</p>) : <p>No additional questions suggested.</p>}</div>
+      </article>
+
+      <article className="solution-card surface-card">
+        <div className="solution-glow"/><div className="card-heading"><div className="soft-icon navy"><ShieldCheck size={19}/></div><div><h3>GenAI analysis</h3><p>{ai.summary}</p></div><span className="confidence"><i/>{ai.confidence} confidence</span></div>
+        <div className="solution-summary"><span><Sparkles size={20}/></span><div><small>SUGGESTED SOLUTION</small><h3>{ai.possibleDuplicate ? `Possible duplicate of #${ai.possibleDuplicate}` : "Evidence-based guidance"}</h3><p>{ai.suggestedSolution || "The retrieved evidence is not sufficient to recommend a verified solution."}</p></div></div>
+        <div className="evidence-trail"><div className="improved-report"><small>IMPROVED TITLE</small><strong>{ai.improvedTitle}</strong><small>IMPROVED DESCRIPTION</small><p className="formatted-description">{ai.improvedDescription}</p><small>IMPROVED REPORT QUALITY</small><strong>{improvedQuality.score}/100 · {improvedQuality.checks.filter(([, present]) => !present).length} details still missing</strong></div></div>
+      </article>
+    </div>
+
+    <article className="related-card surface-card" id="evidence">
+      <div className="card-heading related-heading"><div className="soft-icon lilac"><Link2 size={19}/></div><div><h3>Retrieved GitHub evidence</h3><p>Issues selected before generation</p></div></div>
+      <div className="match-list">{data.relatedIssues.length ? data.relatedIssues.map((issue) => <a className="match-row" href={issue.url} target="_blank" rel="noreferrer" key={issue.number}><span className="match-number">#{issue.number}</span><div><h4>{issue.title}</h4><p>{issue.state} · {issue.discussion.length} comments loaded · {issue.labels.slice(0, 3).join(", ") || "no labels"}</p></div><span className={ai.evidenceIssueNumbers.includes(issue.number) ? "match-tag duplicate" : "match-tag"}>{ai.evidenceIssueNumbers.includes(issue.number) ? "AI citation" : "Retrieved"}</span><strong>{issue.score}%</strong><ExternalLink size={15}/></a>) : <p className="empty-state">No related issues were found. The AI was instructed not to invent evidence.</p>}</div>
+    </article>
+
+    <div className="bottom-row" id="knowledge">
+      <article className="coverage-card surface-card"><div><span className="step-label">RAG PIPELINE</span><h3>Retrieved, then generated.</h3><p>RootLore selected relevant GitHub history before asking the model for an answer.</p></div><div className="coverage-stats"><span><strong>{data.issuesAnalyzed}</strong><small>Issues read</small></span><span><strong>{data.relatedIssues.reduce((total, issue) => total + issue.discussion.length, 0)}</strong><small>Comments</small></span><span><strong>{data.relatedIssues.reduce((total, issue) => total + issue.timeline.length, 0)}</strong><small>Timeline links</small></span><span><strong>{data.releases.length}</strong><small>Releases</small></span></div></article>
+      <article className="feedback-card surface-card"><div className="soft-icon blush"><Sparkles size={19}/></div><div><h3>Was this useful?</h3><p>Your feedback evaluates the AI result.</p></div><div className="feedback-actions"><button className={feedback === "yes" ? "selected" : ""} onClick={() => setFeedback("yes")}><ThumbsUp size={15}/>Yes</button><button className={feedback === "no" ? "selected no" : ""} onClick={() => setFeedback("no")}><ThumbsDown size={15}/>Not quite</button></div></article>
+    </div>
+  </section>;
+}
+
+function History({ entries }) {
+  return <section className="history-section" id="analysis-history">
+    <div className="section-heading"><div><span className="step-label">ANALYSIS HISTORY</span><h2>Recent GenAI reports</h2></div><span className="analysis-time">Stored only in this browser</span></div>
+    <article className="related-card surface-card">
+      {entries.length ? entries.map((entry) => <div className="history-row" key={entry.id}><div><strong>{entry.title}</strong><p>{entry.summary}</p></div><span>{entry.repository}</span><small>{entry.confidence} confidence · {new Date(entry.createdAt).toLocaleString()}</small></div>) : <p className="empty-state">Your last ten completed analyses will appear here.</p>}
+    </article>
+  </section>;
+}

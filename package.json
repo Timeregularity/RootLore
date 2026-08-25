@@ -6,7 +6,10 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "test": "node --test",
+    "evaluate": "node evaluation/run.js",
+    "check": "npm test && npm run evaluate && npm --prefix web run build"
   },
   "dependencies": {
     "cors": "^2.8.5",
