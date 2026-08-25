@@ -2,9 +2,13 @@ import { config } from "../config.js";
 
 const GITHUB_API_URL = "https://api.github.com";
 const REQUEST_TIMEOUT_MS = 15_000;
-const ISSUE_CACHE_MS = 5 * 60 * 1000;
-const MAX_ISSUE_PAGES = 3;
-const issueCache = new Map();
+const ISSUE_CACHE_MS = 15 * 60 * 1000;
+const SUPPORTING_EVIDENCE_CACHE_MS = 6 * 60 * 60 * 1000;
+const FAILURE_CACHE_MS = 60 * 1000;
+const MAX_ISSUE_PAGES = 1;
+const MAX_CACHE_ENTRIES = 500;
+const responseCache = new Map();
+const inFlightRequests = new Map();
 
 // Build standard GitHub headers and authenticate when a token is configured.
 function createHeaders() {
@@ -23,12 +27,36 @@ function createHeaders() {
 
 // Centralize network handling so every GitHub call has a timeout and a useful
 // error instead of exposing Node's vague "fetch failed" message.
-async function githubRequest(url) {
+async function githubRequest(url, cacheMs = SUPPORTING_EVIDENCE_CACHE_MS) {
+  const cacheKey = String(url);
+  const cached = responseCache.get(cacheKey);
+
+  if (cached?.error && Date.now() < cached.expiresAt) throw cached.error;
+  // Most requests are served here without consuming a GitHub API request.
+  if (cached?.data && Date.now() - cached.savedAt < cacheMs) return cached.data;
+
+  // If several users request the same resource together, share one network call.
+  if (inFlightRequests.has(cacheKey)) return inFlightRequests.get(cacheKey);
+
+  const request = requestAndCacheGitHub(cacheKey, cached);
+  inFlightRequests.set(cacheKey, request);
+  try {
+    return await request;
+  } finally {
+    inFlightRequests.delete(cacheKey);
+  }
+}
+
+async function requestAndCacheGitHub(url, cached) {
   let response;
 
   try {
     response = await fetch(url, {
-      headers: createHeaders(),
+      headers: {
+        ...createHeaders(),
+        // A stale entry can be revalidated cheaply instead of downloaded again.
+        ...(cached?.etag ? { "If-None-Match": cached.etag } : {}),
+      },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (cause) {
@@ -41,6 +69,11 @@ async function githubRequest(url) {
     throw error;
   }
 
+  if (response.status === 304 && cached) {
+    cached.savedAt = Date.now();
+    return cached.data;
+  }
+
   const data = await response.json();
   if (!response.ok) {
     const remaining = response.headers.get("x-ratelimit-remaining");
@@ -49,19 +82,28 @@ async function githubRequest(url) {
       : data.message || "GitHub request failed";
     const error = new Error(message);
     error.status = response.status;
+    // Briefly remember failures to prevent many clients hammering an unhealthy
+    // or rate-limited endpoint. A short TTL still allows quick recovery.
+    responseCache.set(url, {
+      error,
+      expiresAt: Date.now() + FAILURE_CACHE_MS,
+      savedAt: Date.now(),
+    });
     throw error;
   }
 
+  if (responseCache.size >= MAX_CACHE_ENTRIES) {
+    responseCache.delete(responseCache.keys().next().value);
+  }
+  responseCache.set(url, {
+    data,
+    etag: response.headers.get("etag"),
+    savedAt: Date.now(),
+  });
   return data;
 }
 
 export async function getRepositoryIssues(owner, repository) {
-  const cacheKey = `${owner}/${repository}`.toLowerCase();
-  const cached = issueCache.get(cacheKey);
-  if (cached && Date.now() - cached.savedAt < ISSUE_CACHE_MS) {
-    return cached.issues;
-  }
-
   const records = [];
   for (let page = 1; page <= MAX_ISSUE_PAGES; page += 1) {
     const url = new URL(
@@ -72,7 +114,7 @@ export async function getRepositoryIssues(owner, repository) {
     url.searchParams.set("per_page", "100");
     url.searchParams.set("page", String(page));
 
-    const pageRecords = await githubRequest(url);
+    const pageRecords = await githubRequest(url, ISSUE_CACHE_MS);
     records.push(...pageRecords);
     if (pageRecords.length < 100) break;
   }
@@ -94,7 +136,6 @@ export async function getRepositoryIssues(owner, repository) {
       updatedAt: issue.updated_at,
     }));
 
-  issueCache.set(cacheKey, { issues, savedAt: Date.now() });
   return issues;
 }
 

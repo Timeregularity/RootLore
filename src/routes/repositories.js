@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { createRateLimiter } from "../middleware/rateLimit.js";
 import { findRelatedIssues } from "../services/analysis.js";
 import {
   getIssueComments,
@@ -10,12 +11,17 @@ import { generateIssueAnalysis } from "../services/groq.js";
 
 export const repositoriesRouter = Router();
 const REPOSITORY_PART = /^[a-z0-9_.-]+$/i;
+const analysisLimiter = createRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  maximum: 10,
+});
 
 function validateRequest(owner, repository, title, description) {
   if (!REPOSITORY_PART.test(owner) || !REPOSITORY_PART.test(repository)) {
     return "Invalid GitHub owner or repository name";
   }
-  if (!title?.trim() || !description?.trim()) {
+  if (typeof title !== "string" || typeof description !== "string" ||
+      !title.trim() || !description.trim()) {
     return "Title and description are required";
   }
   if (title.length > 200 || description.length > 10_000) {
@@ -59,7 +65,7 @@ repositoriesRouter.get("/:owner/:repository/issues", async (request, response) =
 });
 
 // Retrieve repository evidence and ask Groq for a grounded GenAI analysis.
-repositoriesRouter.post("/:owner/:repository/analyze", async (request, response) => {
+repositoriesRouter.post("/:owner/:repository/analyze", analysisLimiter, async (request, response) => {
   try {
     const { owner, repository } = request.params;
     const { title, description } = request.body;
@@ -72,7 +78,8 @@ repositoriesRouter.post("/:owner/:repository/analyze", async (request, response)
     }
 
     const issues = await getRepositoryIssues(owner, repository);
-    const relatedIssues = findRelatedIssues(issues, title, description);
+    // Three strong candidates keep API fan-out and the LLM prompt small.
+    const relatedIssues = findRelatedIssues(issues, title, description, 3);
 
     // Fetch discussions in parallel so five issue requests do not block one by one.
     const [enrichedIssues, releases] = await Promise.all([
@@ -109,6 +116,11 @@ repositoriesRouter.post("/:owner/:repository/analyze", async (request, response)
       },
       relatedIssues: enrichedIssues,
       releases,
+      optimization: {
+        githubIssuesScanned: issues.length,
+        evidenceIssuesEnriched: enrichedIssues.length,
+        groqResponseCached: generated.cached,
+      },
       ...generated,
     });
   } catch (error) {

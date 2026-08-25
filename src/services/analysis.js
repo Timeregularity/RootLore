@@ -4,6 +4,7 @@ const STOP_WORDS = new Set([
   "into", "not", "that", "the", "then", "this", "using", "was", "were",
   "when", "where", "which", "with", "you", "your",
 ]);
+const MIN_RELEVANCE_SCORE = 15;
 
 function words(value) {
   return new Set(
@@ -53,7 +54,7 @@ export function findRelatedIssues(issues, title, description, limit = 5) {
 
       return { ...issue, score, matchedTerms };
     })
-    .filter((issue) => issue.score > 0)
+    .filter((issue) => issue.score >= MIN_RELEVANCE_SCORE)
     .sort((first, second) => second.score - first.score)
     .slice(0, limit);
 }

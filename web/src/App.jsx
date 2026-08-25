@@ -148,6 +148,7 @@ function Results({ data, feedback, setFeedback }) {
       <article className="solution-card surface-card">
         <div className="solution-glow"/><div className="card-heading"><div className="soft-icon navy"><ShieldCheck size={19}/></div><div><h3>GenAI analysis</h3><p>{ai.summary}</p></div><span className="confidence"><i/>{ai.confidence} confidence</span></div>
         <div className="solution-summary"><span><Sparkles size={20}/></span><div><small>SUGGESTED SOLUTION</small><h3>{ai.possibleDuplicate ? `Possible duplicate of #${ai.possibleDuplicate}` : "Evidence-based guidance"}</h3><p>{ai.suggestedSolution || "The retrieved evidence is not sufficient to recommend a verified solution."}</p></div></div>
+        {ai.evidenceClaims?.length > 0 && <div className="claim-list"><small>VALIDATED SUPPORTING CLAIMS</small>{ai.evidenceClaims.map((item) => <div className="claim-row" key={`${item.issueNumber}-${item.claim}`}><strong>{item.claim}</strong><p>“{item.supportingQuote}”</p><span>Verified in issue #{item.issueNumber} · supports {item.supports.join(", ")}</span></div>)}</div>}
         <div className="evidence-trail"><div className="improved-report"><small>IMPROVED TITLE</small><strong>{ai.improvedTitle}</strong><small>IMPROVED DESCRIPTION</small><p className="formatted-description">{ai.improvedDescription}</p><small>IMPROVED REPORT QUALITY</small><strong>{improvedQuality.score}/100 · {improvedQuality.checks.filter(([, present]) => !present).length} details still missing</strong></div></div>
       </article>
     </div>

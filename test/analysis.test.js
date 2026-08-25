@@ -23,7 +23,7 @@ test("strong title and error-code matches rank above weak matches", () => {
   );
 
   assert.equal(results[0].number, 1);
-  assert.ok(results[0].score > results[1].score);
+  assert.equal(results.length, 1);
   assert.ok(results[0].matchedTerms.includes("401"));
 });
 

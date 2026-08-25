@@ -31,11 +31,13 @@ receive a bonus. This approach is inexpensive, deterministic, and explainable.
 Groq constrains the response with JSON Schema. React can therefore render known
 fields without parsing free-form prose.
 
-### Citation validation
+### Claim-level citation validation
 
 Prompt instructions alone are not a security boundary. After generation, the
-backend removes issue numbers that were not in the retrieved evidence. A solution
-without any verified issue citation is removed and confidence is reduced to low.
+backend requires a claim, retrieved issue number, and exact supporting quote. The
+quote must occur in the selected issue title, body, or comment. Citations are
+derived from validated claims. A solution without verified quoted evidence is
+removed and confidence is reduced to low.
 
 ### Controlled API usage
 
@@ -55,6 +57,8 @@ This makes retrieval changes measurable instead of relying only on visual demos.
 - Browser history avoids authentication and database complexity but is local to
   one browser.
 - Only three pages of GitHub records are searched to control latency and quotas.
+- The four-case evaluation is a regression baseline; a credible benchmark should
+  follow the protocol in `evaluation/README.md`.
 - AI output is grounded and validated, but still requires human review.
 
 ## Natural future improvements

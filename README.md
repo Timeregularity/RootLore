@@ -23,9 +23,9 @@ React interface
    v
 Express analysis endpoint
    |
-   +--> GitHub issues (up to 300 recent records)
+   +--> GitHub issues (up to 100 recent records, cached for 15 minutes)
    |       |
-   |       +--> weighted issue retrieval (top 5)
+   |       +--> weighted issue retrieval (top 3)
    |       +--> comments for selected issues
    |       +--> timeline links and closing commits
    |       +--> recent repository releases
@@ -50,8 +50,9 @@ Citation validation and React results
 - AI-generated follow-up questions
 - Possible duplicate detection
 - Confidence assessment
-- Evidence issue citations
-- Hallucination safeguards that remove unknown issue numbers
+- Claim-level evidence with exact supporting quotes
+- Evidence citations derived only from validated quotes
+- Hallucination safeguards that remove unknown issues and unsupported quotes
 - No suggested solution when the model provides no verified citation
 
 ## Supporting application features
@@ -63,8 +64,12 @@ Citation validation and React results
 - Responsive React interface
 - Last ten analyses stored locally in the browser
 - Automated retrieval and citation-validation tests
-- Five-minute repository cache to reduce GitHub API usage
+- ETag-aware GitHub response cache with request deduplication
+- 15-minute issue cache and six-hour supporting-evidence cache
+- 24-hour Groq result cache for identical reports and evidence
+- Only three related issues are enriched, keeping API fan-out and prompts small
 - External API timeouts and rate-limit-aware errors
+- Per-IP analysis rate limiting and restricted CORS
 - Reproducible retrieval evaluation with top-1 accuracy
 
 ## Technology
@@ -101,6 +106,7 @@ Requirements: Node.js 20 or newer and npm.
    PORT=3000
    GITHUB_TOKEN=
    GROQ_API_KEY=gsk_your_real_key
+   CORS_ORIGINS=http://localhost:5173
    ```
 
    `GITHUB_TOKEN` is optional for public repositories. Authentication raises the
@@ -182,21 +188,26 @@ npm run build
 
 RootLore uses several layers rather than relying only on prompt instructions:
 
-1. Only five retrieved issues are supplied as issue evidence.
+1. Only three retrieved issues are supplied as issue evidence.
 2. The system prompt prohibits invented fixes, versions, links, and issue numbers.
 3. Groq constrains output with a strict JSON Schema.
-4. Returned citations are checked against retrieved issue numbers.
-5. Unknown duplicate numbers are removed.
-6. Solutions without a verified issue citation are removed and confidence becomes low.
+4. The model must return a claim, retrieved issue number, and exact quote.
+5. Quotes are checked against retrieved titles, bodies, and comments.
+6. Citations are derived from validated claims instead of trusted model output.
+7. Unknown duplicate numbers are removed.
+8. Solutions without verified quoted evidence are removed and confidence becomes low.
 
 ## Current limitations
 
-- Retrieval is capped at three GitHub pages, so very old issues may not be retrieved.
+- Retrieval intentionally uses the 100 most recent issues to protect API limits, so
+  older issues may not be retrieved.
 - Retrieval is explainable lexical matching, not embedding-based semantic search.
 - Timeline data identifies linked pull requests and commits but does not download
   full diffs or source code.
 - Browser history is local to one device and is not user-authenticated.
 - Generated conclusions still require human review.
+- The four bundled evaluation cases are a regression baseline, not a real-world
+  accuracy claim. See [`evaluation/README.md`](evaluation/README.md).
 
 ## Placement summary
 
