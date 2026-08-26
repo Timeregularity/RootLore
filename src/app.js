@@ -8,7 +8,11 @@ export const app = express();
 // Global middleware enables browser requests and parses incoming JSON bodies.
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || config.corsOrigins.includes(origin)) return callback(null, true);
+    // Chrome extensions have their own protected origin scheme. The API still
+    // applies validation and per-IP rate limits to extension requests.
+    if (!origin || origin.startsWith("chrome-extension://") || config.corsOrigins.includes(origin)) {
+      return callback(null, true);
+    }
     return callback(new Error("Origin is not allowed by CORS"));
   },
 }));

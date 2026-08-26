@@ -135,9 +135,28 @@ function Results({ data, feedback, setFeedback }) {
   const ai = data.analysis;
   const missing = data.quality.checks.filter(([, present]) => !present).length;
   const improvedQuality = analyzeQuality(ai.improvedTitle, ai.improvedDescription);
+  const outcomeType = ai.outcome?.type || (ai.suggestedSolution
+    ? "verified_solution"
+    : ai.inferredSolution
+      ? "inferred_solution"
+      : ai.possibleRemediation
+        ? "possible_remediation"
+        : "structured_issue");
+  const citations = (ai.evidenceClaims?.length || 0) + (ai.documentationClaims?.length || 0);
+  const solutionCitations = [
+    ...(ai.evidenceClaims || []),
+    ...(ai.documentationClaims || []),
+  ].filter((claim) => claim.supports?.includes("solution")).length;
+  const contextCitations = citations - solutionCitations;
+  const outcomeMeta = {
+    verified_solution: ["Repository verified", "Supported by repository evidence", "The action is backed by exact documentation or a confirmed issue resolution.", "Strong evidence"],
+    inferred_solution: ["AI inference", "Grounded, but not directly confirmed", "Repository evidence supports the diagnosis; review the AI-derived action before applying it.", "Review required"],
+    possible_remediation: ["Unverified direction", "Plausible next step", "The approach may help, but repository evidence does not confirm it as a solution.", "Limited evidence"],
+    structured_issue: ["Diagnosis incomplete", "More evidence is needed", "No fix can be supported yet. Follow the diagnostic checklist, then analyze again.", "No supported fix"],
+  }[outcomeType];
 
   return <section className="results-section">
-    <div className="section-heading"><div><span className="step-label">02 · GENAI RESULTS</span><h2>An evidence-backed answer</h2></div><span className="analysis-time">Model: {data.model} · {data.elapsed} seconds</span></div>
+    <div className="section-heading"><div><span className="step-label">02 · ROOTLORE RESULT</span><h2>{ai.outcome?.title || "Repository-grounded assistance"}</h2></div><span className="analysis-time">Model: {data.model} · {data.elapsed} seconds</span></div>
     <div className="results-layout">
       <article className="quality-card surface-card">
         <div className="card-heading"><div className="soft-icon blush"><FileCheck2 size={19}/></div><div><h3>Issue quality</h3><p>{missing} details need attention</p></div><div className="quality-score"><strong>{data.quality.score}</strong><span>/100</span></div></div>
@@ -145,21 +164,25 @@ function Results({ data, feedback, setFeedback }) {
         <div className="follow-up"><span>AI follow-up questions</span>{ai.followUpQuestions.length ? ai.followUpQuestions.slice(0, 3).map((question) => <p key={question}>{question}</p>) : <p>No additional questions suggested.</p>}</div>
       </article>
 
-      <article className="solution-card surface-card">
+      <article className={`solution-card surface-card outcome-${outcomeType}`}>
         <div className="solution-glow"/><div className="card-heading"><div className="soft-icon navy"><ShieldCheck size={19}/></div><div><h3>GenAI analysis</h3><p>{ai.summary}</p></div><span className="confidence"><i/>{ai.confidence} confidence</span></div>
-        <div className="solution-summary"><span><Sparkles size={20}/></span><div><small>SUGGESTED SOLUTION</small><h3>{ai.possibleDuplicate ? `Possible duplicate of #${ai.possibleDuplicate}` : "Evidence-based guidance"}</h3><p>{ai.suggestedSolution || "The retrieved evidence is not sufficient to recommend a verified solution."}</p></div></div>
+        <div className="verdict-bar"><span className="verdict-mark"><ShieldCheck size={18}/></span><div><small>{outcomeMeta[0]}</small><strong>{outcomeMeta[1]}</strong><p>{outcomeMeta[2]}</p></div><div className="verdict-proof"><strong>{outcomeMeta[3]}</strong><small>{solutionCitations} solution · {contextCitations} context</small></div></div>
+        <div className="solution-summary"><span><Sparkles size={20}/></span><div><small>{ai.suggestedSolution ? "VERIFIED SOLUTION" : ai.inferredSolution ? "AI-INFERRED SOLUTION · REVIEW FIRST" : ai.possibleRemediation ? "POSSIBLE REMEDIATION · UNVERIFIED" : "ACTION PLAN"}</small><h3>{ai.possibleDuplicate ? `Possible duplicate of #${ai.possibleDuplicate}` : ai.inferredSolution ? "Grounded technical inference" : ai.possibleRemediation ? "AI-proposed direction" : "What to do next"}</h3><p>{ai.outcome?.message || ai.suggestedSolution || ai.inferredSolution || ai.possibleRemediation || "Add the missing diagnostic evidence and analyze again."}</p></div></div>
         {ai.evidenceClaims?.length > 0 && <div className="claim-list"><small>VALIDATED SUPPORTING CLAIMS</small>{ai.evidenceClaims.map((item) => <div className="claim-row" key={`${item.issueNumber}-${item.claim}`}><strong>{item.claim}</strong><p>“{item.supportingQuote}”</p><span>Verified in issue #{item.issueNumber} · supports {item.supports.join(", ")}</span></div>)}</div>}
+        {ai.documentationClaims?.length > 0 && <div className="claim-list"><small>VALIDATED DOCUMENTATION CLAIMS</small>{ai.documentationClaims.map((item) => <div className="claim-row" key={`${item.path}-${item.claim}`}><strong>{item.claim}</strong><p>“{item.supportingQuote}”</p><a href={item.url} target="_blank" rel="noreferrer">{item.path} <ExternalLink size={12}/></a></div>)}</div>}
         <div className="evidence-trail"><div className="improved-report"><small>IMPROVED TITLE</small><strong>{ai.improvedTitle}</strong><small>IMPROVED DESCRIPTION</small><p className="formatted-description">{ai.improvedDescription}</p><small>IMPROVED REPORT QUALITY</small><strong>{improvedQuality.score}/100 · {improvedQuality.checks.filter(([, present]) => !present).length} details still missing</strong></div></div>
       </article>
     </div>
 
     <article className="related-card surface-card" id="evidence">
-      <div className="card-heading related-heading"><div className="soft-icon lilac"><Link2 size={19}/></div><div><h3>Retrieved GitHub evidence</h3><p>Issues selected before generation</p></div></div>
+      <div className="card-heading related-heading"><div className="soft-icon lilac"><Link2 size={19}/></div><div><h3>Retrieved GitHub evidence</h3><p>Issues and documentation selected before generation</p></div></div>
       <div className="match-list">{data.relatedIssues.length ? data.relatedIssues.map((issue) => <a className="match-row" href={issue.url} target="_blank" rel="noreferrer" key={issue.number}><span className="match-number">#{issue.number}</span><div><h4>{issue.title}</h4><p>{issue.state} · {issue.discussion.length} comments loaded · {issue.labels.slice(0, 3).join(", ") || "no labels"}</p></div><span className={ai.evidenceIssueNumbers.includes(issue.number) ? "match-tag duplicate" : "match-tag"}>{ai.evidenceIssueNumbers.includes(issue.number) ? "AI citation" : "Retrieved"}</span><strong>{issue.score}%</strong><ExternalLink size={15}/></a>) : <p className="empty-state">No related issues were found. The AI was instructed not to invent evidence.</p>}</div>
+      {data.relatedDocuments?.length > 0 && <div className="match-list">{data.relatedDocuments.map((document) => <a className="match-row" href={document.url} target="_blank" rel="noreferrer" key={`${document.path}-${document.passageIndex}`}><span className="match-number">DOC</span><div><h4>{document.path}</h4><p>{document.passage.slice(0, 150)}{document.passage.length > 150 ? "…" : ""}</p></div><span className="match-tag">Documentation</span><strong>{document.matchedTerms.length} terms</strong><ExternalLink size={15}/></a>)}</div>}
+      {data.relatedFiles?.length > 0 && <div className="match-list">{data.relatedFiles.map((file) => <a className="match-row" href={file.url} target="_blank" rel="noreferrer" key={`${file.path}-${file.startLine}`}><span className="match-number">CODE</span><div><h4>{file.path}:{file.startLine}</h4><p>{file.passage.slice(0, 150)}{file.passage.length > 150 ? "…" : ""}</p></div><span className="match-tag duplicate">Referenced source</span><strong>{file.matchedTerms.length} terms</strong><ExternalLink size={15}/></a>)}</div>}
     </article>
 
     <div className="bottom-row" id="knowledge">
-      <article className="coverage-card surface-card"><div><span className="step-label">RAG PIPELINE</span><h3>Retrieved, then generated.</h3><p>RootLore selected relevant GitHub history before asking the model for an answer.</p></div><div className="coverage-stats"><span><strong>{data.issuesAnalyzed}</strong><small>Issues read</small></span><span><strong>{data.relatedIssues.reduce((total, issue) => total + issue.discussion.length, 0)}</strong><small>Comments</small></span><span><strong>{data.relatedIssues.reduce((total, issue) => total + issue.timeline.length, 0)}</strong><small>Timeline links</small></span><span><strong>{data.releases.length}</strong><small>Releases</small></span></div></article>
+      <article className="coverage-card surface-card"><div><span className="step-label">RAG PIPELINE</span><h3>Retrieved, verified, then decided.</h3><p>RootLore searches repository history, documentation, and explicitly referenced source files before choosing solve or escalate.</p></div><div className="coverage-stats"><span><strong>{data.issuesAnalyzed}</strong><small>Issues read</small></span><span><strong>{data.relatedIssues.reduce((total, issue) => total + issue.discussion.length, 0)}</strong><small>Comments</small></span><span><strong>{(data.relatedDocuments?.length || 0) + (data.relatedFiles?.length || 0)}</strong><small>Repo passages</small></span><span><strong>{data.releases.length}</strong><small>Releases</small></span></div></article>
       <article className="feedback-card surface-card"><div className="soft-icon blush"><Sparkles size={19}/></div><div><h3>Was this useful?</h3><p>Your feedback evaluates the AI result.</p></div><div className="feedback-actions"><button className={feedback === "yes" ? "selected" : ""} onClick={() => setFeedback("yes")}><ThumbsUp size={15}/>Yes</button><button className={feedback === "no" ? "selected no" : ""} onClick={() => setFeedback("no")}><ThumbsDown size={15}/>Not quite</button></div></article>
     </div>
   </section>;

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="popup.css"><title>RootLore</title></head>
+<body>
+  <main>
+    <header><div class="mark">R</div><div><h1>RootLore</h1><p>Repository intelligence</p></div><button id="settings" class="icon" title="Settings">⚙</button></header>
+    <section id="unsupported" class="state hidden"><h2>Open a GitHub issue</h2><p>RootLore works on existing issues and new-issue forms.</p></section>
+    <section id="input" class="hidden">
+      <span id="mode" class="badge"></span>
+      <div class="repo"><strong id="repository"></strong><small id="number"></small></div>
+      <label>Title<input id="title" maxlength="200"></label>
+      <label>Detected description <small class="label-note">Original GitHub content</small><textarea id="description" maxlength="10000"></textarea></label>
+      <button id="analyze" class="primary">Analyze with GenAI →</button>
+      <p id="error" class="error"></p>
+    </section>
+    <section id="loading" class="state hidden"><div class="spinner"></div><h2>Retrieving evidence</h2><p>Checking repository history and documentation…</p></section>
+    <section id="result" class="hidden">
+      <div class="result-top"><div><small id="outcomeLabel">ISSUE ANALYSIS</small><h2 id="summary"></h2></div><span id="confidence" class="confidence"></span></div>
+      <div id="verdict" class="verdict"><span class="verdict-icon">✓</span><div><small id="verdictEyebrow"></small><strong id="verdictTitle"></strong><p id="verdictDetail"></p></div><span id="verdictEvidence" class="verdict-evidence"></span></div>
+      <div class="solution"><small id="solutionLabel">ROOTLORE RESULT</small><h3 id="outcomeTitle"></h3><p id="solution"></p></div>
+      <div class="facts"><span><strong id="duplicate">—</strong><small>Duplicate</small></span><span><strong id="documents">0</strong><small>Repo citations</small></span><span><strong id="cached">No</strong><small>Cached</small></span></div>
+      <div id="missing" class="chips"></div>
+      <details id="improvedIssue" class="improved" open>
+        <summary>Improved structured issue</summary>
+        <label>Improved title<input id="improvedTitle" readonly></label>
+        <label>Improved description<textarea id="improvedDescription" readonly></textarea></label>
+      </details>
+      <button id="copy" class="secondary">Copy improved issue</button>
+      <button id="insert" class="primary hidden">Insert into GitHub</button>
+      <button id="again" class="link">← Analyze again</button>
+    </section>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

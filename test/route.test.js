@@ -50,6 +50,15 @@ function githubIssue(number = 125) {
   };
 }
 
+function githubIssueByNumber(number) {
+  return {
+    ...githubIssue(number),
+    title: "Generated files change effort estimates",
+    body: "Ignored generated files should not affect repository search results.",
+    state: "closed",
+  };
+}
+
 function generatedContent() {
   return JSON.stringify({
     summary: "The report matches a known refresh-token failure.",
@@ -73,6 +82,7 @@ function generatedContent() {
       supportingQuote: "was corrected in version 2.4.2",
       supports: ["summary", "duplicate", "solution"],
     }],
+    documentationClaims: [],
   });
 }
 
@@ -95,6 +105,7 @@ function installExternalFetchMock({ malformedGroq = false } = {}) {
     if (url.includes("/timeline") || url.includes("/releases")) {
       return Response.json([]);
     }
+    if (url.endsWith("/issues/28901")) return Response.json(githubIssueByNumber(28901));
     if (url.includes("/issues")) return Response.json([githubIssue()]);
     throw new Error(`Unexpected external URL: ${url}`);
   };
@@ -114,10 +125,35 @@ test("POST analyze completes the mocked GitHub-to-Groq pipeline", async () => {
       },
     });
 
-    assert.equal(response.status, 200);
+    assert.equal(response.status, 200, JSON.stringify(response.body));
     assert.equal(response.body.analysis.evidenceClaims.length, 1);
     assert.deepEqual(response.body.analysis.evidenceIssueNumbers, [125]);
     assert.equal(response.body.analysis.suggestedSolution, "Upgrade to version 2.4.2.");
+    assert.equal(response.body.analysis.outcome.type, "verified_solution");
+  } finally {
+    server.close();
+    restore();
+  }
+});
+
+test("analysis always includes the currently opened closed issue", async () => {
+  const { calls, restore } = installExternalFetchMock();
+  const server = app.listen(0);
+  try {
+    const response = await request(server, {
+      method: "POST",
+      path: "/api/repositories/google-gemini/gemini-cli/analyze",
+      body: {
+        issueNumber: 28901,
+        title: "Generated files change effort estimates",
+        description: "Ignored generated files should not affect repository search results.",
+      },
+    });
+
+    assert.equal(response.status, 200, JSON.stringify(response.body));
+    assert.equal(response.body.relatedIssues[0].number, 28901);
+    assert.equal(response.body.relatedIssues[0].score, 100);
+    assert.ok(calls.github > 0);
   } finally {
     server.close();
     restore();

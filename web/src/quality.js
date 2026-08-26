@@ -2,7 +2,8 @@
 // stays missing instead of being invented merely to increase the score.
 export function analyzeQuality(title, description) {
   const report = `${title}\n${description}`;
-  const hasProvidedLogs = /(?:stack trace|exception|console|```|\b[45]\d\d\b|throws?\s+["'`]|error(?:\s+message)?\s*[:"'`]|logs?\s*(?::|\n)\s*(?!not provided|unknown|not specified)\S)/i.test(report);
+  const explicitlyMissingLogs = /(?:error(?: details| message)?|logs?)[^\n]*\s+(?:is\s+)?(?:not provided|unknown|not specified|missing)|## error details or logs\s*\n\s*[-*–—]?\s*(?:error message\s+)?(?:not provided|unknown|not specified|missing)|\[(?:paste|add|provide)[^\]]*(?:error|stack trace|logs?)[^\]]*\]/i.test(report);
+  const hasProvidedLogs = !explicitlyMissingLogs && /(?:stack trace|exception|```|\b[45]\d\d\b|throws?\s+["'`]|error(?:\s+message)?\s*[:"'`]|console(?:\s+(?:shows?|prints?|reports?))?\s*[:=]\s*\S|logs?\s*(?::|\n)\s*(?!not provided|unknown|not specified)\S)/i.test(report);
   const checks = [
     ["Problem description", description.trim().length >= 20],
     ["Actual behaviour", /(?:error|fail|broken|crash|stops?|unable|instead)/i.test(report)],

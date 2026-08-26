@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "RootLore",
+  "version": "0.1.0",
+  "description": "Evidence-grounded troubleshooting and issue writing for GitHub repositories.",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": [
+    "http://localhost:3000/*",
+    "https://*.onrender.com/*"
+  ],
+  "action": {
+    "default_title": "Analyze with RootLore",
+    "default_popup": "popup/popup.html"
+  },
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [{
+    "matches": ["https://github.com/*/*/issues/*"],
+    "js": ["content/github-content.js"],
+    "run_at": "document_idle"
+  }],
+  "options_page": "options/options.html"
+}

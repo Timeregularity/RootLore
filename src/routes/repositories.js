@@ -1,10 +1,20 @@
 import { Router } from "express";
 import { createRateLimiter } from "../middleware/rateLimit.js";
-import { findRelatedIssues } from "../services/analysis.js";
+import {
+  extractReferencedPaths,
+  findDocumentedCommandCorrections,
+  findRelatedDocuments,
+  findRelatedIssues,
+  findRelatedSourcePassages,
+} from "../services/analysis.js";
 import {
   getIssueComments,
   getIssueTimeline,
+  getRepositoryIssue,
   getRepositoryIssues,
+  getRepositoryDocuments,
+  getRepositorySourceFile,
+  searchRepositoryIssues,
   getRepositoryReleases,
 } from "../services/github.js";
 import { generateIssueAnalysis } from "../services/groq.js";
@@ -68,7 +78,7 @@ repositoriesRouter.get("/:owner/:repository/issues", async (request, response) =
 repositoriesRouter.post("/:owner/:repository/analyze", analysisLimiter, async (request, response) => {
   try {
     const { owner, repository } = request.params;
-    const { title, description } = request.body;
+    const { title, description, issueNumber } = request.body;
     const validationError = validateRequest(owner, repository, title, description);
 
     if (validationError) {
@@ -77,12 +87,33 @@ repositoriesRouter.post("/:owner/:repository/analyze", analysisLimiter, async (r
       });
     }
 
-    const issues = await getRepositoryIssues(owner, repository);
-    // Three strong candidates keep API fan-out and the LLM prompt small.
-    const relatedIssues = findRelatedIssues(issues, title, description, 3);
+    const recentIssues = await getRepositoryIssues(owner, repository);
+    const searchedIssues = await optionalEvidence(
+      searchRepositoryIssues(owner, repository, title, description),
+    );
+    const currentIssue = Number.isInteger(issueNumber)
+      ? await optionalEvidence(getRepositoryIssue(owner, repository, issueNumber))
+      : null;
+    const issues = [currentIssue, ...recentIssues, ...searchedIssues]
+      .filter(Boolean)
+      .filter((issue, index, items) =>
+        items.findIndex((candidate) => candidate.number === issue.number) === index
+      );
+    const referencedPaths = extractReferencedPaths(`${title}\n${description}`);
+    // Always inspect the currently opened issue so maintainer and bot comments
+    // on that page cannot be lost during similarity retrieval. Fill the remaining
+    // slots with the strongest related issues.
+    const openedIssue = Number.isInteger(issueNumber)
+      ? issues.find((issue) => issue.number === issueNumber)
+      : null;
+    const relatedIssues = [
+      ...(openedIssue ? [{ ...openedIssue, score: 100, matchedTerms: ["current issue"] }] : []),
+      ...findRelatedIssues(issues, title, description, openedIssue ? 2 : 3)
+        .filter((issue) => issue.number !== openedIssue?.number),
+    ].slice(0, 3);
 
     // Fetch discussions in parallel so five issue requests do not block one by one.
-    const [enrichedIssues, releases] = await Promise.all([
+    const [enrichedIssues, releases, documents, sourceFiles] = await Promise.all([
       Promise.all(relatedIssues.map(async (issue) => {
         const [discussion, timeline] = await Promise.all([
           optionalEvidence(getIssueComments(
@@ -99,12 +130,35 @@ repositoriesRouter.post("/:owner/:repository/analyze", analysisLimiter, async (r
         return { ...issue, discussion, timeline };
       })),
       optionalEvidence(getRepositoryReleases(owner, repository)),
+      optionalEvidence(getRepositoryDocuments(owner, repository)),
+      Promise.all(referencedPaths.map((path) => optionalEvidence(
+        getRepositorySourceFile(owner, repository, path),
+      ))),
     ]);
+    const relatedDocuments = findRelatedDocuments(documents, title, description);
+    const commandCorrections = findDocumentedCommandCorrections(
+      documents,
+      `${title}\n${description}`,
+    );
+    const relatedFiles = findRelatedSourcePassages(
+      sourceFiles.filter((file) => file && !Array.isArray(file)),
+      title,
+      description,
+    );
+    const repositoryPassages = [
+      ...commandCorrections,
+      ...relatedFiles,
+      ...relatedDocuments,
+    ].filter((item, index, items) =>
+      items.findIndex((candidate) => candidate.path === item.path && candidate.passage === item.passage) === index
+    ).slice(0, 4);
     const generated = await generateIssueAnalysis(
       title,
       description,
       enrichedIssues,
       releases,
+      repositoryPassages,
+      Number.isInteger(issueNumber) ? issueNumber : null,
     );
 
     return response.json({
@@ -116,9 +170,19 @@ repositoriesRouter.post("/:owner/:repository/analyze", analysisLimiter, async (r
       },
       relatedIssues: enrichedIssues,
       releases,
+      relatedDocuments,
+      relatedFiles,
+      commandCorrections,
+      referencedPaths,
       optimization: {
         githubIssuesScanned: issues.length,
+        recentIssuesScanned: recentIssues.length,
+        searchIssuesFound: searchedIssues.length,
         evidenceIssuesEnriched: enrichedIssues.length,
+        documentationPassages: relatedDocuments.length,
+        documentationFilesCached: documents.length,
+        sourcePassages: relatedFiles.length,
+        commandCorrections: commandCorrections.length,
         groqResponseCached: generated.cached,
       },
       ...generated,

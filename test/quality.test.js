@@ -32,3 +32,34 @@ test("a missing logs placeholder does not count as provided evidence", () => {
 
   assert.equal(logsCheck[1], false);
 });
+
+test("a formatted error-message placeholder keeps issue quality below 100", () => {
+  const result = analyzeQuality(
+    "Application crashes on Windows when opening Developer Tools",
+    "## Problem\nApplication crashes.\n\n## Environment\n- Windows\n- React 19.0\n\n## Steps to reproduce\n1. Open the app\n\n## Expected behaviour\nApp remains stable.\n\n## Actual behaviour\nApp crashes.\n\n## Error details or logs\n- Error message not provided.",
+  );
+  const logsCheck = result.checks.find(([label]) => label === "Error details or logs");
+
+  assert.equal(logsCheck[1], false);
+  assert.equal(result.score, 83);
+});
+
+test("an instructional bracket placeholder is not treated as an error log", () => {
+  const result = analyzeQuality(
+    "Application crashes on Windows",
+    "Version 19.0 crashes.\n\n## Error details or logs\n- [Paste the exact error message, stack trace, or relevant logs]",
+  );
+  const logsCheck = result.checks.find(([label]) => label === "Error details or logs");
+
+  assert.equal(logsCheck[1], false);
+});
+
+test("saying only that the console shows an error is not treated as an exact log", () => {
+  const result = analyzeQuality(
+    "Application crashes on Windows",
+    "Version 19.0 crashes when Developer Tools opens. The console shows an error.",
+  );
+  const logsCheck = result.checks.find(([label]) => label === "Error details or logs");
+
+  assert.equal(logsCheck[1], false);
+});
