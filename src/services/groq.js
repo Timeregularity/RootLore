@@ -46,6 +46,35 @@ const ANALYSIS_SCHEMA = {
     followUpQuestions: { type: "array", items: { type: "string" } },
     possibleDuplicate: { type: ["integer", "null"] },
     suggestedSolution: { type: ["string", "null"] },
+    solutionPlan: {
+      type: ["object", "null"],
+      properties: {
+        diagnosis: { type: "string" },
+        steps: {
+          type: "array",
+          maxItems: 5,
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              instruction: { type: "string" },
+              code: { type: ["string", "null"] },
+            },
+            required: ["title", "instruction", "code"],
+            additionalProperties: false,
+          },
+        },
+        whyItWorks: { type: "string" },
+        beforeCode: { type: ["string", "null"] },
+        afterCode: { type: ["string", "null"] },
+        verificationSteps: { type: "array", maxItems: 3, items: { type: "string" } },
+        cautions: { type: "array", maxItems: 2, items: { type: "string" } },
+      },
+      // Groq strict JSON requires every declared property here. The nullable
+      // code fields must be returned as null when no exact comparison exists.
+      required: ["diagnosis", "steps", "whyItWorks", "beforeCode", "afterCode", "verificationSteps", "cautions"],
+      additionalProperties: false,
+    },
     confidence: { type: "string", enum: ["low", "medium", "high"] },
     evidenceIssueNumbers: { type: "array", items: { type: "integer" } },
     evidenceClaims: {
@@ -85,7 +114,7 @@ const ANALYSIS_SCHEMA = {
   },
   required: [
     "summary", "improvedTitle", "improvedReport", "followUpQuestions",
-    "possibleDuplicate", "suggestedSolution", "confidence",
+    "possibleDuplicate", "suggestedSolution", "solutionPlan", "confidence",
     "evidenceIssueNumbers", "evidenceClaims", "documentationClaims",
   ],
   additionalProperties: false,
@@ -211,6 +240,42 @@ export function parseProviderAnalysis(data) {
     throw invalidProviderResponse();
   }
 
+  // Groq JSON-object mode guarantees JSON but not every optional output key.
+  // Defaults only make an answer less specific; validateAnalysis still removes
+  // ungrounded solutions and citations before anything reaches the UI.
+  if (analysis && typeof analysis === "object") {
+    analysis.summary = typeof analysis.summary === "string" ? analysis.summary : "No confirmed repository conclusion was generated.";
+    analysis.improvedTitle = typeof analysis.improvedTitle === "string" ? analysis.improvedTitle : "Issue report";
+    const report = analysis.improvedReport && typeof analysis.improvedReport === "object" ? analysis.improvedReport : {};
+    analysis.improvedReport = {
+      problem: typeof report.problem === "string" ? report.problem : "",
+      environment: Array.isArray(report.environment) ? report.environment.filter((item) => typeof item === "string") : [],
+      stepsToReproduce: Array.isArray(report.stepsToReproduce) ? report.stepsToReproduce.filter((item) => typeof item === "string") : [],
+      expectedBehaviour: typeof report.expectedBehaviour === "string" ? report.expectedBehaviour : "",
+      actualBehaviour: typeof report.actualBehaviour === "string" ? report.actualBehaviour : "",
+      errorDetails: Array.isArray(report.errorDetails) ? report.errorDetails.filter((item) => typeof item === "string") : [],
+    };
+    analysis.followUpQuestions = Array.isArray(analysis.followUpQuestions) ? analysis.followUpQuestions.filter((item) => typeof item === "string") : [];
+    analysis.possibleDuplicate = Number.isInteger(analysis.possibleDuplicate) ? analysis.possibleDuplicate : null;
+    analysis.suggestedSolution = typeof analysis.suggestedSolution === "string" ? analysis.suggestedSolution : null;
+    const plan = analysis.solutionPlan;
+    analysis.solutionPlan = plan && typeof plan === "object" && typeof plan.diagnosis === "string" && typeof plan.whyItWorks === "string"
+      ? {
+          diagnosis: plan.diagnosis,
+          steps: Array.isArray(plan.steps) ? plan.steps.filter((step) => step && typeof step.title === "string" && typeof step.instruction === "string").slice(0, 5).map((step) => ({ title: step.title, instruction: step.instruction, code: typeof step.code === "string" ? step.code : null })) : [],
+          whyItWorks: plan.whyItWorks,
+          beforeCode: typeof plan.beforeCode === "string" ? plan.beforeCode : null,
+          afterCode: typeof plan.afterCode === "string" ? plan.afterCode : null,
+          verificationSteps: Array.isArray(plan.verificationSteps) ? plan.verificationSteps.filter((item) => typeof item === "string").slice(0, 3) : [],
+          cautions: Array.isArray(plan.cautions) ? plan.cautions.filter((item) => typeof item === "string").slice(0, 2) : [],
+        }
+      : null;
+    analysis.confidence = ["low", "medium", "high"].includes(analysis.confidence) ? analysis.confidence : "low";
+    analysis.evidenceIssueNumbers = Array.isArray(analysis.evidenceIssueNumbers) ? analysis.evidenceIssueNumbers.filter(Number.isInteger) : [];
+    analysis.evidenceClaims = Array.isArray(analysis.evidenceClaims) ? analysis.evidenceClaims : [];
+    analysis.documentationClaims = Array.isArray(analysis.documentationClaims) ? analysis.documentationClaims : [];
+  }
+
   const valid =
     analysis && typeof analysis === "object" &&
     typeof analysis.summary === "string" &&
@@ -220,6 +285,17 @@ export function parseProviderAnalysis(data) {
     Array.isArray(analysis.improvedReport.stepsToReproduce) &&
     Array.isArray(analysis.improvedReport.errorDetails) &&
     Array.isArray(analysis.followUpQuestions) &&
+    (analysis.solutionPlan === null || (
+      analysis.solutionPlan && typeof analysis.solutionPlan.diagnosis === "string" &&
+      Array.isArray(analysis.solutionPlan.steps) && analysis.solutionPlan.steps.length <= 5 &&
+      analysis.solutionPlan.steps.every((step) => step && typeof step.title === "string" &&
+        typeof step.instruction === "string" && (step.code === null || typeof step.code === "string")) &&
+      typeof analysis.solutionPlan.whyItWorks === "string" &&
+      (analysis.solutionPlan.beforeCode === null || typeof analysis.solutionPlan.beforeCode === "string") &&
+      (analysis.solutionPlan.afterCode === null || typeof analysis.solutionPlan.afterCode === "string") &&
+      Array.isArray(analysis.solutionPlan.verificationSteps) && analysis.solutionPlan.verificationSteps.length <= 3 &&
+      Array.isArray(analysis.solutionPlan.cautions) && analysis.solutionPlan.cautions.length <= 2
+    )) &&
     ["low", "medium", "high"].includes(analysis.confidence) &&
     Array.isArray(analysis.evidenceIssueNumbers) &&
     Array.isArray(analysis.evidenceClaims) &&
@@ -248,6 +324,13 @@ export function parseFailedGeneration(data) {
     // create a duplicate, solution, or citation that the model did not return.
     analysis.possibleDuplicate ??= null;
     analysis.suggestedSolution ??= null;
+    analysis.solutionPlan ??= null;
+    if (analysis.solutionPlan && typeof analysis.solutionPlan === "object") {
+      // Recover partial failed_generation content into the strict provider
+      // shape. Null means there is no evidence-backed code comparison.
+      analysis.solutionPlan.beforeCode ??= null;
+      analysis.solutionPlan.afterCode ??= null;
+    }
     analysis.confidence ??= "low";
     analysis.evidenceIssueNumbers ??= [];
     analysis.evidenceClaims ??= [];
@@ -386,6 +469,33 @@ export function validateAnalysis(
       ? `Use the repository's documented command: ${documentedCorrection.documentedCommand}`
       : completedIssueClaims[0]?.supportingQuote || null)
     : null;
+  const selectedSolution = suggestedSolution || inferredSolution || possibleRemediation;
+  const planActionIsSafe = (value) => !containsUnsupportedVersion(value, solutionEvidenceText) &&
+    !(analysis.confidence === "low" && isUnsafeLowConfidenceAction(value));
+  const solutionPlan = selectedSolution && analysis.solutionPlan
+    ? {
+        diagnosis: analysis.solutionPlan.diagnosis.trim(),
+        steps: analysis.solutionPlan.steps.slice(0, 5).filter((step) =>
+          step.title.trim() && step.instruction.trim() &&
+          planActionIsSafe(`${step.instruction} ${step.code || ""}`)
+        ).map((step) => ({
+          title: step.title.trim(),
+          instruction: step.instruction.trim(),
+          code: step.code?.trim() || null,
+        })),
+        whyItWorks: analysis.solutionPlan.whyItWorks.trim(),
+        beforeCode: analysis.solutionPlan.beforeCode &&
+          planActionIsSafe(analysis.solutionPlan.beforeCode)
+          ? analysis.solutionPlan.beforeCode.trim() : null,
+        afterCode: analysis.solutionPlan.afterCode &&
+          planActionIsSafe(analysis.solutionPlan.afterCode)
+          ? analysis.solutionPlan.afterCode.trim() : null,
+        verificationSteps: analysis.solutionPlan.verificationSteps.slice(0, 3)
+          .filter((step) => typeof step === "string" && step.trim()).map((step) => step.trim()),
+        cautions: analysis.solutionPlan.cautions.slice(0, 2)
+          .filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim()),
+      }
+    : null;
   const outcome = suggestedSolution
     ? {
         type: "verified_solution",
@@ -442,6 +552,7 @@ export function validateAnalysis(
     inferredSolution,
     possibleRemediation,
     suggestedSolution,
+    solutionPlan,
     outcome,
     confidence: hasVerifiedEvidence || hasDocumentationEvidence ? analysis.confidence : "low",
   };
@@ -524,14 +635,9 @@ async function requestGroqAnalysis(title, description, relatedIssues, releases, 
       body: JSON.stringify({
       model: MODEL,
       temperature: 0.2,
-      max_completion_tokens: 2200,
+      max_completion_tokens: 3000,
       response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "rootlore_issue_analysis",
-          strict: true,
-          schema: ANALYSIS_SCHEMA,
-        },
+        type: "json_object",
       },
       messages: [
         {
@@ -558,11 +664,11 @@ stated action such as "open Developer Tools" is a valid reproduction step. A
 stated symptom such as "application crashes" is actual behaviour. Do not discard
 known facts merely because the original report lacks headings. Use empty arrays
 or omit facts only when information is genuinely absent; the backend will insert
-reporter-facing placeholders. Never invent facts. Return valid JSON with exactly these fields: summary (string),
+reporter-facing placeholders. Never invent facts. Return one JSON object with exactly these fields: summary (string),
 improvedTitle (string), improvedReport (object containing problem, environment,
 stepsToReproduce, expectedBehaviour, actualBehaviour, and errorDetails),
 followUpQuestions (array of strings), possibleDuplicate (issue number or null),
-suggestedSolution (string or null), confidence (low, medium, or high), and
+suggestedSolution (string or null), solutionPlan (object or null), confidence (low, medium, or high), and
 evidenceIssueNumbers (array of issue numbers), evidenceClaims (array of
 objects containing claim, issueNumber, supportingQuote, and supports), and
 documentationClaims (array of objects containing claim, path, supportingQuote,
@@ -602,7 +708,14 @@ worked. Other closed issues are not automatically solved. A strongly implied
 repository pattern may produce a medium-confidence inferred solution. A low-
 confidence direction must remain non-destructive and inspection-oriented. Cite
 exact evidence supporting the inference. The backend will label inferred results
-as review-required, not verified.`,
+as review-required, not verified. When suggestedSolution is non-null, solutionPlan
+must express the same bounded action as: a concise diagnosis; at most five ordered
+steps with title, instruction, and optional code; a short whyItWorks explanation;
+always include beforeCode and afterCode: use null for each when evidence does not
+support an exact change. Include
+most three verificationSteps; and at most two cautions. Use null when no solution
+is returned. Do not add commands, filenames, code, or diagnostic claims merely to
+fill the plan. Code must omit Markdown fences and backticks.`,
         },
         {
           role: "user",

@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import {
-  ArrowRight, Check, ExternalLink, FileCheck2, GitMerge, Link2, Menu,
-  Search, ShieldCheck, Sparkles, ThumbsDown, ThumbsUp, X,
+  AlertTriangle, ArrowRight, Check, Copy, ExternalLink, FileCheck2, GitMerge,
+  Link2, Menu, RotateCcw, Search, ShieldCheck, Sparkles, ThumbsDown, ThumbsUp, X,
 } from "lucide-react";
 import { analyzeQuality } from "./quality.js";
+import ResultView from "./ResultView.jsx";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
@@ -125,13 +126,17 @@ export default function App() {
         <div className="form-footer"><p>The model must cite supplied GitHub evidence.</p><button className="analyze-button" onClick={analyze} disabled={loading || !repository || !title.trim() || !description.trim()}>{loading ? <><span className="spinner"/>Generating analysis</> : <><Search size={17}/>Analyze with GenAI<ArrowRight size={16}/></>}</button></div>
       </section>
 
-      {results && <Results data={results} feedback={feedback} setFeedback={setFeedback}/>} 
+      {results && <Results data={results} feedback={feedback} setFeedback={setFeedback} analyzeAgain={() => document.getElementById("workspace")?.scrollIntoView({ behavior: "smooth" })}/>}
       <History entries={history}/>
     </main>
   </div>;
 }
 
-function Results({ data, feedback, setFeedback }) {
+function Results(props) {
+  return <ResultView {...props}/>;
+}
+
+function LegacyResults({ data, feedback, setFeedback }) {
   const ai = data.analysis;
   const missing = data.quality.checks.filter(([, present]) => !present).length;
   const improvedQuality = analyzeQuality(ai.improvedTitle, ai.improvedDescription);

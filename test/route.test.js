@@ -74,6 +74,15 @@ function generatedContent() {
     followUpQuestions: [],
     possibleDuplicate: 125,
     suggestedSolution: "Upgrade to version 2.4.2.",
+    solutionPlan: {
+      diagnosis: "The report matches a refresh-token failure corrected in 2.4.2.",
+      steps: [{ title: "Upgrade", instruction: "Upgrade to version 2.4.2.", code: null }],
+      whyItWorks: "The cited repository issue confirms the correction.",
+      beforeCode: null,
+      afterCode: null,
+      verificationSteps: ["Retry login after token expiration."],
+      cautions: [],
+    },
     confidence: "high",
     evidenceIssueNumbers: [125],
     evidenceClaims: [{

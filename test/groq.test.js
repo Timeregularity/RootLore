@@ -15,6 +15,7 @@ function generatedAnalysis(overrides = {}) {
     followUpQuestions: [],
     possibleDuplicate: null,
     suggestedSolution: null,
+    solutionPlan: null,
     confidence: "low",
     evidenceIssueNumbers: [],
     evidenceClaims: [],
@@ -383,6 +384,19 @@ test("malformed provider JSON is rejected with a controlled error", () => {
   );
 });
 
+test("missing non-action response fields safely default instead of blocking analysis", () => {
+  const parsed = parseProviderAnalysis({ choices: [{ message: { content: JSON.stringify({
+    summary: "A related issue was retrieved.",
+    improvedTitle: "Login fails",
+    improvedReport: { problem: "Login fails", environment: [], stepsToReproduce: [], expectedBehaviour: "", actualBehaviour: "", errorDetails: [] },
+    followUpQuestions: [], possibleDuplicate: null, suggestedSolution: null, solutionPlan: null,
+  }) } }] });
+
+  assert.equal(parsed.confidence, "low");
+  assert.deepEqual(parsed.evidenceClaims, []);
+  assert.deepEqual(parsed.documentationClaims, []);
+});
+
 test("a valid failed generation with omitted evidence arrays is recovered", () => {
   const recovered = parseFailedGeneration({
     error: {
@@ -410,4 +424,68 @@ test("a valid failed generation with omitted evidence arrays is recovered", () =
   assert.equal(recovered.confidence, "low");
   assert.deepEqual(recovered.documentationClaims, []);
   assert.deepEqual(recovered.evidenceClaims, []);
+  assert.equal(recovered.solutionPlan, null);
+});
+
+test("a structured solution plan is bounded and follows a validated solution", () => {
+  const result = validateAnalysis(generatedAnalysis({
+    suggestedSolution: "Use the documented npm command.",
+    confidence: "medium",
+    solutionPlan: {
+      diagnosis: "The submitted command has a typo.",
+      steps: Array.from({ length: 7 }, (_, index) => ({
+        title: `Step ${index + 1}`,
+        instruction: "Use the documented npm command.",
+        code: "npm install package",
+      })),
+      whyItWorks: "The repository documents the npm command.",
+      beforeCode: "nam install package",
+      afterCode: "npm install package",
+      verificationSteps: ["Run the command.", "Check its exit status.", "Confirm installation.", "Extra check."],
+      cautions: ["Review first.", "Keep a backup.", "Extra caution."],
+    },
+    documentationClaims: [{
+      claim: "The npm command is documented.", path: "README.md",
+      supportingQuote: "npm install package", supports: ["solution"],
+    }],
+  }), [], [{ path: "README.md", passage: "Run npm install package.", url: "https://example.test/README" }]);
+
+  assert.equal(result.outcome.type, "verified_solution");
+  assert.equal(result.solutionPlan.steps.length, 5);
+  assert.equal(result.solutionPlan.verificationSteps.length, 3);
+  assert.equal(result.solutionPlan.cautions.length, 2);
+  assert.equal(result.solutionPlan.afterCode, "npm install package");
+});
+
+test("a plan is removed when its parent solution is rejected", () => {
+  const result = validateAnalysis(generatedAnalysis({
+    suggestedSolution: "Upgrade to version 99.0.",
+    confidence: "high",
+    solutionPlan: {
+      diagnosis: "Unknown.", steps: [{ title: "Upgrade", instruction: "Upgrade to version 99.0.", code: null }],
+      whyItWorks: "Unknown.", beforeCode: null, afterCode: null,
+      verificationSteps: ["Retry."], cautions: [],
+    },
+  }), []);
+
+  assert.equal(result.outcome.type, "structured_issue");
+  assert.equal(result.solutionPlan, null);
+});
+
+test("a partial failed plan is recovered with null code comparisons", () => {
+  const parsed = parseFailedGeneration({ error: { failed_generation: JSON.stringify({
+    ...generatedAnalysis({
+      suggestedSolution: "Use the documented command.",
+      solutionPlan: {
+        diagnosis: "The command differs from the documentation.",
+        steps: [{ title: "Use the documented command", instruction: "Use the documented command.", code: null }],
+        whyItWorks: "The documentation provides the supported command.",
+        verificationSteps: ["Run the command again."], cautions: [],
+      },
+    }),
+    improvedReport: { problem: "Problem", environment: [], stepsToReproduce: [], expectedBehaviour: "Expected", actualBehaviour: "Actual", errorDetails: [] },
+  }) } });
+
+  assert.equal(parsed.solutionPlan.beforeCode, null);
+  assert.equal(parsed.solutionPlan.afterCode, null);
 });
