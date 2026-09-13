@@ -2,7 +2,7 @@ import { config } from "../config.js";
 import { createHash } from "node:crypto";
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODEL = "openai/gpt-oss-120b";
+const MODEL = "openai/gpt-oss-20b";
 const REQUEST_TIMEOUT_MS = 30_000;
 const ANALYSIS_CACHE_MS = 24 * 60 * 60 * 1000;
 const MAX_ANALYSIS_CACHE_ENTRIES = 250;
